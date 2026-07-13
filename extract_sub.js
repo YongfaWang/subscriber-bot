@@ -41,6 +41,12 @@ async function main() {
   
   const page = await browser.newPage();
   
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+  await page.setExtraHTTPHeaders({
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+  });
+  
   try {
     console.log('[2/5] Navigating to login page...');
     await page.goto(LOGIN_URL, { waitUntil: 'networkidle2', timeout: 60000 });
