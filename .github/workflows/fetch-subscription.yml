@@ -27,13 +27,8 @@ jobs:
 
       - name: Install Chromium
         run: |
-          apt-get update
-          apt-get install -y chromium chromium-driver 2>/dev/null || \
-          apt-get install -y chromium-browser 2>/dev/null || \
-          echo "Using Puppeteer bundled Chromium"
-          
-          echo "CHROME_PATH=/usr/bin/chromium" >> $GITHUB_ENV
-          echo "CHROMIUM_PATH=/usr/bin/chromium" >> $GITHUB_ENV
+          npx puppeteer browsers install chrome
+          echo "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=false" >> $GITHUB_ENV
 
       - name: Configure Git
         run: |
@@ -57,11 +52,7 @@ jobs:
             echo "PASSWORD=$PASSWORD" >> .env
           fi
           
-          node extract_sub.js || {
-            echo "Script failed, trying puppeteer bundled chromium"
-            PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=false npx puppeteer browsers install chrome
-            node extract_sub.js
-          }
+          node extract_sub.js
 
       - name: Update data.txt
         run: |
