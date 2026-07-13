@@ -1,157 +1,198 @@
-﻿/**
- * black-sea.top subscription extractor
- * Supports Windows (Edge) and Linux (Chromium)
- */
-
-const puppeteer = require("puppeteer-core");
-
-const isWindows = process.platform === "win32";
-const isLinux = process.platform === "linux";
-
-const LOGIN_URL = process.env.LOGIN_URL || "https://black-sea.top/#/login";
-const ACCOUNT   = process.env.ACCOUNT   || "35691818147@qq.com";
-const PASSWORD  = process.env.PASSWORD || "qwe123123";
-
-const BROWSER_PATHS = {
-  win32: [
-    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-  ],
-  linux: [
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/google-chrome",
-  ],
-  darwin: [
-    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  ]
-};
-
-async function waitForElement(page, selector, { timeout = 60000, interval = 500 } = {}) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const el = await page.$(selector);
-      if (el) return el;
-    } catch (e) { /* ignore */ }
-    await new Promise(r => setTimeout(r, interval));
-  }
-  throw new Error("Element not found: " + selector);
-}
-
-async function findBrowser() {
-  const paths = BROWSER_PATHS[process.platform] || [];
-  const fs = require("fs");
-  const { execSync } = require("child_process");
-
-  for (const p of paths) {
-    if (fs.existsSync(p)) {
-      console.log("  -> Found browser: " + p);
-      return p;
-    }
-  }
-
-  if (isLinux) {
-    console.log("  -> Installing Chromium...");
-    try {
-      execSync("apt-get update && apt-get install -y chromium", { stdio: "pipe" });
-      return "/usr/bin/chromium";
-    } catch (e) { /* continue */ }
-  }
-  return null;
-}
+const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
 
 async function main() {
-  console.log("[Platform] " + process.platform);
-  console.log("[1/6] Finding browser...");
-
-  const browserPath = await findBrowser();
-
-  console.log("[2/6] Launching browser...");
-  const launchOptions = {
+  const env = {};
+  
+  if (fs.existsSync('.env')) {
+    const content = fs.readFileSync('.env', 'utf8');
+    content.split('\n').forEach(line => {
+      const [key, ...valueParts] = line.split('=');
+      if (key && valueParts.length > 0) {
+        env[key.trim()] = valueParts.join('=').trim();
+      }
+    });
+  }
+  
+  const LOGIN_URL = env.LOGIN_URL || process.env.LOGIN_URL;
+  const ACCOUNT = env.ACCOUNT || process.env.ACCOUNT;
+  const PASSWORD = env.PASSWORD || process.env.PASSWORD;
+  
+  if (!LOGIN_URL || !ACCOUNT || !PASSWORD) {
+    console.error('Missing required environment variables');
+    process.exit(1);
+  }
+  
+  console.log('Starting browser...');
+  
+  const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-  };
-  if (browserPath) launchOptions.executablePath = browserPath;
-
-  const browser = await puppeteer.launch(launchOptions);
-  const page = await browser.newPage();
-  page.setDefaultNavigationTimeout(120000);
-
-  await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0");
-  await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => false });
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu'
+    ]
   });
-
-  console.log("[3/6] Opening login page...");
-  await page.goto(LOGIN_URL, { waitUntil: "load", timeout: 120000 });
-  await new Promise(r => setTimeout(r, 5000));
-  console.log("  -> URL:", page.url());
-
-  console.log("[4/6] Filling credentials...");
+  
+  const page = await browser.newPage();
+  
   try {
-    const emailInput = await waitForElement(page, "#email", { timeout: 60000 });
-    await emailInput.click({ clickCount: 3 });
-    await emailInput.type(ACCOUNT, { delay: 30 });
-
-    const pwdInput = await waitForElement(page, "#password", { timeout: 10000 });
-    await pwdInput.click({ clickCount: 3 });
-    await pwdInput.type(PASSWORD, { delay: 30 });
-  } catch (e) { console.log("  -> Warning:", e.message); }
-
-  console.log("[5/6] Clicking login...");
-  try {
-    const loginBtn = await waitForElement(page, "#app > div > div:nth-child(1) > div > div.auth-card > form > button", { timeout: 10000 });
-    await loginBtn.click();
-  } catch (e) { console.log("  -> Button click failed"); }
-
-  await new Promise(r => setTimeout(r, 3000));
-  try { await page.waitForURL("**/dashboard", { timeout: 60000 }); } catch {}
-  console.log("  -> Dashboard:", page.url());
-
-  console.log("[6/6] Looking for subscription...");
-  let subUrl = null;
-  const sels = ["input[type=\"text\"]", "input", "#app input[type=\"text\"]", "input[readonly]"];
-
-  for (const sel of sels) {
-    try {
-      const el = await waitForElement(page, sel, { timeout: 15000 });
-      const val = await page.evaluate(el => el.value, el);
-      if (val && (val.startsWith("http") || val.length > 20)) {
-        subUrl = val;
-        console.log("  -> Found via:", sel);
+    console.log('Navigating to login page...');
+    await page.goto(LOGIN_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+    
+    await page.waitForSelector('input[type="text"], input[type="email"], input[name="username"], input[name="account"]', { timeout: 30000 })
+      .catch(() => console.log('Username input not found, trying generic input'));
+    
+    const usernameSelectors = [
+      'input[type="text"]',
+      'input[type="email"]', 
+      'input[name="username"]',
+      'input[name="account"]',
+      'input[placeholder*="账号"], input[placeholder*="account"]',
+      'input[placeholder*="邮箱"], input[placeholder*="email"]'
+    ];
+    
+    for (const selector of usernameSelectors) {
+      const input = await page.$(selector);
+      if (input) {
+        await input.type(ACCOUNT, { delay: 50 });
+        console.log('Username entered');
         break;
       }
-    } catch {}
-  }
-
-  let subContent = null;
-  if (subUrl) {
-    console.log("\n=== SUBSCRIPTION URL ===");
-    console.log(subUrl);
-    console.log("=======================\n");
-
-    try {
-      const response = await page.goto(subUrl, { waitUntil: "load", timeout: 60000 });
-      subContent = await response.text();
-    } catch (e) {
-      console.log("  -> Trying curl...");
-      try {
-        const { execSync } = require("child_process");
-        subContent = execSync("curl -sL \"" + subUrl + "\"", { timeout: 60000, encoding: "utf8" });
-      } catch (e2) { console.log("  -> Failed:", e2.message); }
     }
-  } else {
-    console.log("\n[!] URL not found");
+    
+    await page.waitForTimeout(500);
+    
+    const passwordSelectors = [
+      'input[type="password"]',
+      'input[name="password"]',
+      'input[placeholder*="密码"], input[placeholder*="password"]'
+    ];
+    
+    for (const selector of passwordSelectors) {
+      const input = await page.$(selector);
+      if (input) {
+        await input.type(PASSWORD, { delay: 50 });
+        console.log('Password entered');
+        break;
+      }
+    }
+    
+    await page.waitForTimeout(500);
+    
+    const submitSelectors = [
+      'button[type="submit"]',
+      'button:contains("登录"), button:contains("登录")',
+      'button:contains("登陆"), button:contains("登陆")',
+      'button:contains("Login"), button:contains("Sign in")',
+      '.login-btn, .submit-btn, .btn-primary'
+    ];
+    
+    for (const selector of submitSelectors) {
+      const button = await page.$(selector);
+      if (button) {
+        await button.click();
+        console.log('Login button clicked');
+        break;
+      }
+    }
+    
+    await page.waitForTimeout(5000);
+    
+    const subscriptions = [];
+    
+    const linkSelectors = [
+      'a[href*="subscription"]',
+      'a[href*="sub"]',
+      'a[href*="link"]',
+      '.subscription-link',
+      '.sub-link',
+      '[class*="subscription"] a',
+      '[class*="sub"] a'
+    ];
+    
+    for (const selector of linkSelectors) {
+      const links = await page.$$(selector);
+      for (const link of links) {
+        const href = await link.evaluate(el => el.href);
+        const text = await link.evaluate(el => el.textContent.trim());
+        if (href && !subscriptions.find(s => s.href === href)) {
+          subscriptions.push({ href, text });
+        }
+      }
+    }
+    
+    const pageContent = await page.content();
+    const urlMatches = pageContent.match(/https?:\/\/[^\s"'<>]+/g) || [];
+    for (const url of urlMatches) {
+      if (!subscriptions.find(s => s.href === url) && 
+          (url.includes('subscription') || url.includes('sub') || url.includes('link'))) {
+        subscriptions.push({ href: url, text: url });
+      }
+    }
+    
+    if (subscriptions.length > 0) {
+      console.log(`Found ${subscriptions.length} subscription links`);
+      
+      const extractedContent = [];
+      
+      for (const sub of subscriptions) {
+        try {
+          console.log(`Fetching: ${sub.text}`);
+          const subPage = await browser.newPage();
+          await subPage.goto(sub.href, { waitUntil: 'networkidle2', timeout: 30000 });
+          
+          const content = await subPage.evaluate(() => {
+            const preTags = document.querySelectorAll('pre');
+            const codeTags = document.querySelectorAll('code');
+            const textareas = document.querySelectorAll('textarea');
+            
+            if (preTags.length > 0) {
+              return Array.from(preTags).map(el => el.textContent).join('\n');
+            }
+            if (codeTags.length > 0) {
+              return Array.from(codeTags).map(el => el.textContent).join('\n');
+            }
+            if (textareas.length > 0) {
+              return Array.from(textareas).map(el => el.value || el.textContent).join('\n');
+            }
+            
+            return document.body ? document.body.innerText : '';
+          });
+          
+          if (content && content.trim()) {
+            extractedContent.push(`=== ${sub.text} ===`);
+            extractedContent.push(content.trim());
+            extractedContent.push('');
+          }
+          
+          await subPage.close();
+        } catch (err) {
+          console.error(`Failed to fetch ${sub.href}: ${err.message}`);
+        }
+      }
+      
+      if (extractedContent.length > 0) {
+        const outputPath = path.join(__dirname, 'sub_content.txt');
+        fs.writeFileSync(outputPath, extractedContent.join('\n'), 'utf8');
+        console.log(`Content saved to ${outputPath}`);
+      } else {
+        console.log('No content extracted');
+      }
+    } else {
+      console.log('No subscription links found');
+    }
+    
+    await browser.close();
+    console.log('Done');
+    
+  } catch (error) {
+    console.error('Error:', error.message);
+    await browser.close();
+    process.exit(1);
   }
-
-  await browser.close();
-
-  const fs = require("fs");
-  if (subContent) fs.writeFileSync("sub_content.txt", subContent);
-  if (subUrl) fs.writeFileSync("sub_url.txt", subUrl);
-  console.log("\n[*] Done");
 }
 
-main().catch(err => { console.error("\n[!] Error:", err.message); process.exit(1); });
+main();
