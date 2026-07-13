@@ -1,3 +1,2 @@
-﻿# Subscription Data
+# Subscription Data
 # This file is auto-updated by GitHub Actions every 3 minutes
-# Last updated: 2026-07-13 12:25:58
